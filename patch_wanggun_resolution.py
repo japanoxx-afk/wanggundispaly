@@ -26,6 +26,7 @@ class PatchPoint:
 PATCH_POINTS = [
     PatchPoint(0x5030A, 800, "global screen width"),
     PatchPoint(0x50325, 600, "global screen height"),
+    PatchPoint(0x50340, 449, "gameplay viewport height"),
     PatchPoint(0x532B9, 600, "CreateWindowEx height"),
     PatchPoint(0x532BE, 800, "CreateWindowEx width"),
     PatchPoint(0x53492, 600, "iCARUS_Init viewport height"),
@@ -82,17 +83,25 @@ def verify_patch_points(data: bytes) -> list[str]:
 def verify_repatchable_points(data: bytes) -> list[str]:
     width_values = {read_u32(data, point.offset) for point in PATCH_POINTS if point.original == 800}
     height_values = {read_u32(data, point.offset) for point in PATCH_POINTS if point.original == 600}
+    viewport_values = {read_u32(data, point.offset) for point in PATCH_POINTS if point.original == 449}
     issues: list[str] = []
     if len(width_values) != 1:
         issues.append(f"width patch points disagree: {sorted(width_values)}")
     if len(height_values) != 1:
         issues.append(f"height patch points disagree: {sorted(height_values)}")
+    if len(viewport_values) != 1:
+        issues.append(f"viewport-height patch points disagree: {sorted(viewport_values)}")
     width = next(iter(width_values))
     height = next(iter(height_values))
+    viewport_height = next(iter(viewport_values))
     if width < 800 or width > 8192:
         issues.append(f"current width is outside expected range: {width}")
     if height < 600 or height > 8192:
         issues.append(f"current height is outside expected range: {height}")
+    if viewport_height not in (449, height - 151):
+        issues.append(
+            f"current gameplay viewport height should be 449 or screen height - 151: {viewport_height}"
+        )
     return issues
 
 
@@ -132,17 +141,28 @@ def main() -> int:
     replacements = {
         "width": args.width,
         "height": args.height,
+        "viewport_height": args.height - 151,
     }
     patched = bytearray(original)
     for point in PATCH_POINTS:
-        value = replacements["width" if point.original == 800 else "height"]
+        if point.original == 800:
+            value = replacements["width"]
+        elif point.original == 600:
+            value = replacements["height"]
+        else:
+            value = replacements["viewport_height"]
         write_u32(patched, point.offset, value)
 
     print(f"target: {exe}")
     print(f"sha256: {digest}")
     for point in PATCH_POINTS:
         current = read_u32(original, point.offset)
-        value = replacements["width" if point.original == 800 else "height"]
+        if point.original == 800:
+            value = replacements["width"]
+        elif point.original == 600:
+            value = replacements["height"]
+        else:
+            value = replacements["viewport_height"]
         print(f"0x{point.offset:05X}: {current} -> {value} ({point.label})")
 
     if args.dry_run:
